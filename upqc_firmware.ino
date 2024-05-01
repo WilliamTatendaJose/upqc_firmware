@@ -2,19 +2,35 @@
 #include "Wire.h"
 #include "PZEM004Tv30.h"
 #include "ArduinoJson.h"
+#include "LiquidCrystal.h"
 
-PZEM004Tv30 pzme(17, 18); // RX, TX
+#define RX 17
+#define Tx 16
 
+PZEM004Tv30 pzme(Serial2,17, 16, PZEM_DEFAULT_ADDR); // RX, TX
 
+const int rs = 19, en = 23, d4 = 18, d5 = 5, d6 = 4, d7 = 15;
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+const int lcdSwitch=25;
+volatile bool lcdOn = false;
+
+float voltage;
+float current ;
+float energy ;
+float powerFactor;
 static void sendTelemetry();
 static void generateTelemetryPayload();
 static void establishConnection();
-static void getPzPowerReadings();
-
+void getPzPowerReadings();
+void lcdDisplay(float voltage, float current, float energy, float powerFactor);
+void ARDUINO_ISR_ATTR isr();
 void setup() 
 {
+   attachInterrupt(lcdSwitch, isr, FALLING);
    establishConnection();
-   Serial.Begin(9600);
+   Serial.begin(115200);
+   Serial2.begin(9600, SERIAL_8N1, 17, 16);
+  lcd.begin( 4,  16);
 }
 
 void loop()
@@ -36,6 +52,8 @@ void loop()
     sendTelemetry();
     next_telemetry_send_time_ms = millis() + TELEMETRY_FREQUENCY_MILLISECS;
   }
+
+  lcdDisplay(voltage, current, energy, powerFactor);
 }
 static void generateTelemetryPayload()
 {
@@ -48,11 +66,14 @@ static void generateTelemetryPayload()
  telemetry_payload = "{ \"msgCount\": " + String(telemetry_send_count++) + " }";
 */
 getPzPowerReadings();
-JsonDocument telemetry_payload;
-telemetry_payload["Voltage"] =voltage;
-telemetry_payload["Current"] = current;
-telemetry_payload["Energy"]= energy;
-telemetry_payload["Power Factor"]= powerFactor;
+JsonDocument jsonTelemetry_payload;
+jsonTelemetry_payload["Message Count"]= telemetry_send_count++;
+jsonTelemetry_payload["Voltage"] =voltage;
+jsonTelemetry_payload["Current"] = current;
+jsonTelemetry_payload["Energy"]= energy;
+jsonTelemetry_payload["Power Factor"]= powerFactor;
+
+serializeJson(jsonTelemetry_payload, telemetry_payload);
  
 }
 
@@ -89,11 +110,35 @@ static void sendTelemetry()
   }
 }
 
-static void getPzPowerReadings()
+void lcdDisplay(float voltage, float current, float energy, float powerFactor)
 {
-  float voltage= pzme.voltage();
-  float current = pzme.current();
-  float energy = pzme.energy();
-  float powerFactor=  pzme.pf();
+  lcd.println("Voltage:"+String(voltage));
+  lcd.println("Current:"+String(current));
+  lcd.println("Power Factor:"+String(powerFactor));
+  lcd.println("Energy:"+String(energy));
 
+}
+
+
+void getPzPowerReadings()
+{
+  voltage= pzme.voltage();
+  current = pzme.current();
+  energy = pzme.energy();
+  powerFactor=  pzme.pf();
+
+}
+
+void ARDUINO_ISR_ATTR isr()
+{
+  lcdOn=!lcdOn;
+  if(lcdOn==true)
+  {
+    // Turn on the display:
+    lcd.display();
+  }else
+  {
+    //turn off lcd 
+    lcd.noDisplay();
+  }
 }
